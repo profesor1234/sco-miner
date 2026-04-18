@@ -419,11 +419,13 @@ int main(int argc, char** argv)
     char address[128]="";
     char node[128]="http://51.91.122.48:8080";
     int  gpu_id=0;
+    long long nonce_offset=0;
 
     for(int i=1;i<argc;i++){
         if(strcmp(argv[i],"--address")==0&&i+1<argc) strncpy(address,argv[++i],sizeof(address)-1);
         else if(strcmp(argv[i],"--node")==0&&i+1<argc) strncpy(node,argv[++i],sizeof(node)-1);
         else if(strcmp(argv[i],"--gpu")==0&&i+1<argc) gpu_id=atoi(argv[++i]);
+        else if(strcmp(argv[i],"--nonce-offset")==0&&i+1<argc) nonce_offset=atoll(argv[++i]);
         else if(strncmp(argv[i],"SCO",3)==0) strncpy(address,argv[i],sizeof(address)-1);
     }
 
@@ -466,7 +468,7 @@ int main(int argc, char** argv)
 
     long long last_accepted_ts=0;
     long long total_blocks=0;
-    long long global_base=0;  /* carries across blocks — no repeated nonces */
+    long long global_base=nonce_offset;  /* start at offset — no overlap between GPUs */
     double session_start=get_time();
 
     for(;;){
