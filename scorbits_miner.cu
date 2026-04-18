@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <unistd.h>
 #include <curl/curl.h>
 
 /* ── SHA-256 macros ──────────────────────────────────────────────────────── */
@@ -114,7 +115,20 @@ __device__ int gpu_itoa(char* buf, long long v)
     return i;
 }
 
-/* ── Mining kernel ───────────────────────────────────────────────────────── */
+/* ── Self-test kernel ────────────────────────────────────────────────────── */
+__global__ void selftest_kernel(char* result)
+{
+    /* SHA-256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824 */
+    const uint8_t input[5]={'h','e','l','l','o'};
+    uint8_t hash[32];
+    sha256_gpu(input,5,hash);
+    const char hx[]="0123456789abcdef";
+    for(int i=0;i<32;i++){
+        result[i*2  ]=hx[hash[i]>>4];
+        result[i*2+1]=hx[hash[i]&0xF];
+    }
+    result[64]='\0';
+}
 /*
  * Hash = SHA256(prefix + nonce_decimal + address)
  * prefix = index_str + ts_str + txData + prevHash  (built on CPU, sent to GPU)
@@ -452,8 +466,30 @@ int main(int argc, char** argv)
     int bpg=prop.multiProcessorCount*128;
     if(bpg>32768) bpg=32768;
     long long batch=(long long)tpb*bpg;
-    printf("[GPU] %d SMs | CUDA %d.%d | Batch: %lld hashes/launch\n\n",
+    printf("[GPU] %d SMs | CUDA %d.%d | Batch: %lld hashes/launch\n",
         prop.multiProcessorCount,prop.major,prop.minor,(long long)batch);
+
+    /* Self-test GPU SHA-256 */
+    {
+        char *d_result; char h_result[65]={0};
+        cudaMalloc(&d_result,65);
+        cudaMemset(d_result,0,65);
+        selftest_kernel<<<1,1>>>(d_result);
+        cudaDeviceSynchronize();
+        cudaMemcpy(h_result,d_result,64,cudaMemcpyDeviceToHost);
+        h_result[64]='\0';
+        const char* expected="2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        if(strcmp(h_result,expected)==0)
+            printf("[Test] GPU SHA-256: OK! ✓\n\n");
+        else{
+            printf("[Test] GPU SHA-256: WRONG!\n");
+            printf("[Test] Got:      %s\n",h_result);
+            printf("[Test] Expected: %s\n",expected);
+            printf("[ERROR] GPU SHA-256 is broken on this hardware! Exiting.\n");
+            return 1;
+        }
+        cudaFree(d_result);
+    }
 
     /* GPU buffers */
     char *d_prefix,*d_address,*d_found_hash;
